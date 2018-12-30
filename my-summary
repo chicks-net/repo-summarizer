@@ -1,0 +1,87 @@
+#!/usr/bin/perl
+
+# pragrmas and core modules
+use strict;
+use warnings;
+use Carp;
+use Data::Dumper; # just for debugging
+
+# CPAN
+use LWP::Simple qw(get);
+use JSON::MaybeXS qw(decode_json);
+
+my @default_users = qw(chicks-net fini-net);
+
+foreach my $user (@default_users) {
+	my $repos_url = "https://api.github.com/users/$user/repos?per_page=100";
+	my $repos = url_json($repos_url);
+
+	foreach my $repo (@$repos) {
+		my $name = $repo->{name};
+		my $fork = $repo->{fork};
+		my $archived = $repo->{archived};
+		my $open_issues_count = $repo->{open_issues_count};
+		my $forks = $repo->{forks};
+		my $watchers = $repo->{watchers};
+		my $language = $repo->{language} || 'unk_lang';
+		my $license = $repo->{license}->{spdx_id} || 'undef_license';
+
+		if ($fork) {
+			print "- $name forked in $language\n";
+		} else {
+			my @worth_mentioning;
+
+			# issues
+			if ($open_issues_count) {
+				my $issues = "$open_issues_count issues";
+				push(@worth_mentioning, $issues);
+			}
+
+			# watchers
+			if ($watchers) {
+				my $watching = "$watchers watchers";
+				push(@worth_mentioning, $watching);
+			}
+
+			# license
+			push(@worth_mentioning,"$license license");
+
+			# has
+			my $has = "is quiet";
+			if (scalar @worth_mentioning) {
+				$has = 'has ' . join(' and ', @worth_mentioning);
+			}
+
+			print "- $name in $language $has\n";
+		}
+	}
+
+	sleep(2);
+}
+
+sub url_json {
+	my $url = shift @_;
+	my $quiet = shift(@_) || 0; # default to verbose;
+
+	print "GETting $url ...\n";
+	my $retries = 2;
+	my $raw_html;
+	while ($retries) {
+		$raw_html = get($url);
+		last if defined $raw_html;
+		my $sleep_secs = int(rand(20)*(3-$retries));
+		print "\tsleeping for $sleep_secs seconds on failed GET $url\n";
+		sleep($sleep_secs);
+		$retries--;
+	}
+	croak "failed on GET $url" unless defined $raw_html;
+	my $raw_length = length $raw_html;
+	print "got $raw_length bytes from $url\n" unless $quiet;
+
+	# parse
+	my $json = JSON::MaybeXS->new->allow_nonref;
+	my $js_ref = $json->decode($raw_html);
+	die "no ref back from json->decode()" unless $js_ref;
+
+	return $js_ref;
+}
